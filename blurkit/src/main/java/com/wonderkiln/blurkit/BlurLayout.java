@@ -7,13 +7,14 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Point;
+import android.graphics.PointF;
 import android.graphics.Rect;
-import android.graphics.drawable.BitmapDrawable;
 import android.util.AttributeSet;
 import android.view.Choreographer;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 
 import java.lang.ref.WeakReference;
 
@@ -43,12 +44,27 @@ public class BlurLayout extends FrameLayout {
     private boolean mRunning;
 
     /** Is window attached? */
-    private boolean isAttachedToWindow;
+    private boolean mAttachedToWindow;
+
+    /** Do we need to recalculate the position each invalidation? */
+    private boolean mPositionLocked;
+
+    /** Do we need to regenerate the view bitmap each invalidation? */
+    private boolean mViewLocked;
 
     // Calculated class dependencies
 
+    /** ImageView to show the blurred content. */
+    private ImageView mImageView;
+
     /** Reference to View for top-parent. For retrieval see {@link #getActivityView() getActivityView}. */
     private WeakReference<View> mActivityView;
+
+    /** A saved point to re-use when {@link #lockPosition()} called. */
+    private Point mLockedPoint;
+
+    /** A saved bitmap for the view to re-use when {@link #lockView()} called. */
+    private Bitmap mLockedBitmap;
 
     public BlurLayout(Context context) {
         super(context, null);
@@ -57,7 +73,7 @@ public class BlurLayout extends FrameLayout {
     public BlurLayout(Context context, AttributeSet attrs) {
         super(context, attrs);
 
-        if(!isInEditMode()) {
+        if (!isInEditMode()) {
             BlurKit.init(context);
         }
 
@@ -73,6 +89,10 @@ public class BlurLayout extends FrameLayout {
         } finally {
             a.recycle();
         }
+
+        mImageView = new ImageView(getContext());
+        mImageView.setScaleType(ImageView.ScaleType.FIT_XY);
+        addView(mImageView);
     }
 
     /** Choreographer callback that re-draws the blur and schedules another callback. */
@@ -89,13 +109,14 @@ public class BlurLayout extends FrameLayout {
         if (mRunning) {
             return;
         }
+
         if (mFPS > 0) {
             mRunning = true;
             Choreographer.getInstance().postFrameCallback(invalidationLoop);
         }
     }
 
-    /** PauseBlurLayout continuous invalidation. **/
+    /** Pause BlurLayout continuous invalidation. **/
     public void pauseBlur() {
         if (!mRunning) {
             return;
@@ -108,14 +129,14 @@ public class BlurLayout extends FrameLayout {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        isAttachedToWindow = true;
+        mAttachedToWindow = true;
         startBlur();
     }
 
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        isAttachedToWindow = false;
+        mAttachedToWindow = false;
         pauseBlur();
     }
 
@@ -127,7 +148,7 @@ public class BlurLayout extends FrameLayout {
         super.invalidate();
         Bitmap bitmap = blur();
         if (bitmap != null) {
-            setBackground(new BitmapDrawable(bitmap));
+            mImageView.setImageBitmap(bitmap);
         }
     }
 
@@ -148,8 +169,19 @@ public class BlurLayout extends FrameLayout {
             }
         }
 
-        // Calculate the relative point to the parent view.
-        Point pointRelativeToActivityView = getPositionInScreen();
+        Point pointRelativeToActivityView;
+        if (mPositionLocked) {
+            // Generate a locked point if null.
+            if (mLockedPoint == null) {
+                mLockedPoint = getPositionInScreen();
+            }
+
+            // Use locked point.
+            pointRelativeToActivityView = mLockedPoint;
+        } else {
+            // Calculate the relative point to the parent view.
+            pointRelativeToActivityView = getPositionInScreen();
+        }
 
         // Set alpha to 0 before creating the parent view bitmap.
         // The blur view shouldn't be visible in the created bitmap.
@@ -185,36 +217,56 @@ public class BlurLayout extends FrameLayout {
         int bottomOffset = yPadding;
         bottomOffset = y + height + bottomOffset <= screenHeight ? bottomOffset : 0;
 
-        // Create parent view bitmap, cropped to the BlurLayout area with above padding.
+        // Parent view bitmap, downscaled with mDownscaleFactor
         Bitmap bitmap;
-        try {
-            bitmap = getDownscaledBitmapForView(
-                    mActivityView.get(),
-                    new Rect(
-                            pointRelativeToActivityView.x + leftOffset,
-                            pointRelativeToActivityView.y + topOffset,
-                            pointRelativeToActivityView.x + getWidth() + Math.abs(leftOffset) + rightOffset,
-                            pointRelativeToActivityView.y + getHeight() + Math.abs(topOffset) + bottomOffset
-                    ),
-                    mDownscaleFactor
-            );
-        } catch (BlurKitException e) {
-            return null;
-        } catch (NullPointerException e) {
-            return null;
+        if (mViewLocked) {
+            // It's possible for mLockedBitmap to be null here even with view locked.
+            // lockView() should always properly set mLockedBitmap if this code is reached
+            // (it passed previous checks), so recall lockView and assume it's good.
+            if (mLockedBitmap == null) {
+                lockView();
+            }
+
+            if (width == 0 || height == 0) {
+                return null;
+            }
+
+            bitmap = Bitmap.createBitmap(mLockedBitmap, x, y, width, height);
+        } else {
+            try {
+                // Create parent view bitmap, cropped to the BlurLayout area with above padding.
+                bitmap = getDownscaledBitmapForView(
+                        mActivityView.get(),
+                        new Rect(
+                                pointRelativeToActivityView.x + leftOffset,
+                                pointRelativeToActivityView.y + topOffset,
+                                pointRelativeToActivityView.x + getWidth() + Math.abs(leftOffset) + rightOffset,
+                                pointRelativeToActivityView.y + getHeight() + Math.abs(topOffset) + bottomOffset
+                        ),
+                        mDownscaleFactor
+                );
+            } catch (BlurKitException e) {
+                return null;
+            } catch (NullPointerException e) {
+                return null;
+            }
+
         }
 
-        // Blur the bitmap.
-        bitmap = BlurKit.getInstance().blur(bitmap, mBlurRadius);
+        if (!mViewLocked) {
+            // Blur the bitmap.
+            bitmap = BlurKit.getInstance().blur(bitmap, mBlurRadius);
 
-        //Crop the bitmap again to remove the padding.
-        bitmap = Bitmap.createBitmap(
-                bitmap,
-                (int) (Math.abs(leftOffset) * mDownscaleFactor),
-                (int) (Math.abs(topOffset) * mDownscaleFactor),
-                width,
-                height
-        );
+            //Crop the bitmap again to remove the padding.
+            bitmap = Bitmap.createBitmap(
+                    bitmap,
+                    (int) (Math.abs(leftOffset) * mDownscaleFactor),
+                    (int) (Math.abs(topOffset) * mDownscaleFactor),
+                    width,
+                    height
+            );
+
+        }
 
         // Make self visible again.
         setAlpha(1);
@@ -243,32 +295,32 @@ public class BlurLayout extends FrameLayout {
      * caching behavior.
      */
     private Point getPositionInScreen() {
-        return getPositionInScreen(this);
+        PointF pointF = getPositionInScreen(this);
+        return new Point((int) pointF.x, (int) pointF.y);
     }
 
     /**
      * Finds the Point of the parent view, and offsets result by self getX() and getY().
      * @return Point determining position of the passed in view inside all of its ViewParents.
      */
-    private Point getPositionInScreen(View view) {
+    private PointF getPositionInScreen(View view) {
         if (getParent() == null) {
-            return new Point();
+            return new PointF();
         }
-
 
         ViewGroup parent;
         try {
             parent = (ViewGroup) view.getParent();
         } catch (Exception e) {
-            return new Point();
+            return new PointF();
         }
 
         if (parent == null) {
-            return new Point();
+            return new PointF();
         }
 
-        Point point = getPositionInScreen(parent);
-        point.offset((int) view.getX(), (int) view.getY());
+        PointF point = getPositionInScreen(parent);
+        point.offset(view.getX(), view.getY());
         return point;
     }
 
@@ -308,6 +360,10 @@ public class BlurLayout extends FrameLayout {
      */
     public void setDownscaleFactor(float downscaleFactor) {
         this.mDownscaleFactor = downscaleFactor;
+
+        // This field is now bad (it's pre-scaled with downscaleFactor so will need to be re-made)
+        this.mLockedBitmap = null;
+
         invalidate();
     }
 
@@ -317,6 +373,10 @@ public class BlurLayout extends FrameLayout {
      */
     public void setBlurRadius(int blurRadius) {
         this.mBlurRadius = blurRadius;
+
+        // This field is now bad (it's pre-blurred with blurRadius so will need to be re-made)
+        this.mLockedBitmap = null;
+
         invalidate();
     }
 
@@ -331,9 +391,52 @@ public class BlurLayout extends FrameLayout {
 
         this.mFPS = fps;
 
-        if (isAttachedToWindow) {
+        if (mAttachedToWindow) {
             startBlur();
         }
+    }
+
+    /**
+     * Save the view bitmap to be re-used each frame instead of regenerating.
+     */
+    public void lockView() {
+        mViewLocked = true;
+
+        if (mActivityView != null && mActivityView.get() != null) {
+            View view = mActivityView.get().getRootView();
+            try {
+                setAlpha(0f);
+                mLockedBitmap = getDownscaledBitmapForView(view, new Rect(0, 0, view.getWidth(), view.getHeight()), mDownscaleFactor);
+                setAlpha(1f);
+                mLockedBitmap = BlurKit.getInstance().blur(mLockedBitmap, mBlurRadius);
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+    }
+
+    /**
+     * Stop using saved view bitmap. View bitmap will now be re-made each frame.
+     */
+    public void unlockView() {
+        mViewLocked = false;
+        mLockedBitmap = null;
+    }
+
+    /**
+     * Save the view position to be re-used each frame instead of regenerating.
+     */
+    public void lockPosition() {
+        mPositionLocked = true;
+        mLockedPoint = getPositionInScreen();
+    }
+
+    /**
+     * Stop using saved point. Point will now be re-made each frame.
+     */
+    public void unlockPosition() {
+        mPositionLocked = false;
+        mLockedPoint = null;
     }
 
 }

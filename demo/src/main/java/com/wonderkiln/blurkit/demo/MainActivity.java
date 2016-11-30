@@ -9,7 +9,6 @@ public class MainActivity extends AppCompatActivity {
 
     //private BlurLayout blurLayout;
     private Button showFragmentButton;
-    private float movement = 1.6f;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -17,17 +16,6 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         //blurLayout = (BlurLayout) findViewById(R.id.blurLayout);
         showFragmentButton = (Button)findViewById(R.id.showFragmentButton);
-
-//        final ImageView imageView = (ImageView) findViewById(R.id.imageView);
-//        imageView.animate().scaleX(movement).scaleY(movement).setDuration(1500).setListener(new AnimatorListenerAdapter() {
-//            @Override
-//            public void onAnimationEnd(Animator animation) {
-//                super.onAnimationEnd(animation);
-//                movement = movement > 1.2f ? 1.2f : 1.6f;
-//                imageView.animate().scaleX(movement).scaleY(movement).setDuration(1500).setListener(this).start();
-//            }
-//        }).start();
-
         showFragmentButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -38,6 +26,18 @@ public class MainActivity extends AppCompatActivity {
                     .addToBackStack(null)
                     .commit();
             }
+/*
+        blurLayout.animate().translationY(movement).setDuration(1500).setListener(new AnimatorListenerAdapter() {
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                super.onAnimationEnd(animation);
+                movement = movement > 0 ? -150 : 150;
+                blurLayout.animate().translationY(movement).setDuration(1500).setListener(this).start();
+            }
+        }).start();
+*/
+
         });
     }
 
@@ -45,6 +45,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onStart() {
         super.onStart();
         //blurLayout.startBlur();
+        //blurLayout.lockView();
     }
 
     @Override
