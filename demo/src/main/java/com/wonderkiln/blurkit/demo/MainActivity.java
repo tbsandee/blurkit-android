@@ -1,18 +1,13 @@
 package com.wonderkiln.blurkit.demo;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 import android.widget.Button;
-import android.widget.ImageView;
-
-import com.wonderkiln.blurkit.BlurLayout;
 
 public class MainActivity extends AppCompatActivity {
 
-    private BlurLayout blurLayout;
+    //private BlurLayout blurLayout;
     private float movement = 150;
     private Button showFragmentButton;
 
@@ -20,10 +15,12 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        blurLayout = (BlurLayout) findViewById(R.id.blurLayout);
+        //blurLayout = (BlurLayout) findViewById(R.id.blurLayout);
         showFragmentButton = (Button)findViewById(R.id.showFragmentButton);
 
+/*
         blurLayout.animate().translationY(movement).setDuration(1500).setListener(new AnimatorListenerAdapter() {
+
             @Override
             public void onAnimationEnd(Animator animation) {
                 super.onAnimationEnd(animation);
@@ -31,6 +28,7 @@ public class MainActivity extends AppCompatActivity {
                 blurLayout.animate().translationY(movement).setDuration(1500).setListener(this).start();
             }
         }).start();
+*/
 
         showFragmentButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -48,13 +46,13 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        blurLayout.startBlur();
-        blurLayout.lockView();
+        //blurLayout.startBlur();
+        //blurLayout.lockView();
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        blurLayout.pauseBlur();
+        //blurLayout.pauseBlur();
     }
 }
